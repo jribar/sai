@@ -14,9 +14,32 @@ Sai.BarChartView = Sai.AxisChartView.extend({
   // Bar #1: "1, 2, 3"
   // Bar #2: "4, 5, 6"
   data: null,
-  
-  // @param: dataAttrs - Hash of styling parameters
-  // @example: {stacked: true, horizontal: true, colors: ['red' , 'blue', 'green']}
+
+  dataArray: function() {
+    var ret = [],
+        data = this.get('data');
+    function walkArray(arr) {
+      if (arr && arr.isEnumerable) {
+        arr.forEach(function(item) {
+          if (item && item.isEnumerable) {
+            walkArray(item);
+          } else {
+            ret.push(item);
+          }
+        });
+      }
+    }
+    walkArray(data);
+    return ret;
+  }.property('data').cacheable(),
+
+  /**
+   *
+   * outOf - Will scale your restulds to this. eg 100, if you want to show your results as a percentage.
+   *
+   * @example: {stacked: true, horizontal: true, colors: ['red' , 'blue', 'green']}
+   * @param: dataAttrs - Hash of styling parameters
+   */
   dataAttrs: null,
   
   // @param grid: show a grid for all the points
@@ -180,7 +203,7 @@ Sai.BarChartView = Sai.AxisChartView.extend({
   },
   
   _makeAxi: function(f, canvas, d, isStacked, isHorizontal){
-    var axis, path, tCount, space, offset, barGroups, tmp, aa,
+    var axis, path, tCount, space, offset, barGroups, tmp, aa, xt, yt,
         xa = this.get('xaxis') || {},
         ya = this.get('yaxis') || {}, yScale,
         xBuffer = xa.buffer || 0.1,
@@ -198,18 +221,17 @@ Sai.BarChartView = Sai.AxisChartView.extend({
       // Calculate the coordinate system
       xa.coordMin = startX;
       xa.coordMax = endX;
-      
-      aa = isHorizontal ? this._calcForLabelAlignment(xa, startX, endX, barGroups.maxHeight) : this._calcForBarAlignment(dLen, xa, startX, endX, barGroups.maxGroupNum);
+      aa = isHorizontal ? this._calcForLabelAlignment(xa, startX, endX, barGroups) : this._calcForBarAlignment(dLen, xa, startX, endX, barGroups.maxGroupNum);
       xa = aa[0]; tCount = aa[1];
-      if (SC.none(xa.hidden) || !xa.hidden) this.makeAxis(canvas, startX, startY, endX, startY, xa, {direction: 'x', len: 5, count: tCount, space: xa.space, offset: xa.offset});
+      if (SC.none(xa.hidden) || !xa.hidden) this.makeAxis(canvas, startX, startY, endX, startY, xa, {direction: 'x', len: 5, start: barGroups.minHeight, count: tCount, space: xa.space, offset: xa.offset});
     }
     // Y Axis
     if (ya){
       ya.coordMin = startY;
       ya.coordMax = endY;
-      aa = isHorizontal ? this._calcForBarAlignment(dLen, ya, endY, startY, barGroups.maxGroupNum) : this._calcForLabelAlignment(ya, endY, startY, barGroups.maxHeight);
+      aa = isHorizontal ? this._calcForBarAlignment(dLen, ya, endY, startY, barGroups.maxGroupNum) : this._calcForLabelAlignment(ya, endY, startY, barGroups);
       ya = aa[0]; tCount = aa[1];
-      if (SC.none(ya.hidden) || !ya.hidden) this.makeAxis(canvas, startX, startY, startX, endY, ya, {direction: 'y', len: 5, count: tCount, space: ya.space, offset: ya.offset});
+      if (SC.none(ya.hidden) || !ya.hidden) this.makeAxis(canvas, startX, startY, startX, endY, ya, {direction: 'y', len: 5, start: barGroups.minHeight, count: tCount, space: ya.space, offset: ya.offset});
     }
     
     return [xa, ya];
@@ -227,24 +249,23 @@ Sai.BarChartView = Sai.AxisChartView.extend({
     return [axis, tCount];
   },
   
-  _calcForLabelAlignment: function(axis, start, end, maxHeight){
-    var tCount, hasStepIncrement, hasStepCount;
+  _calcForLabelAlignment: function(axis, start, end, barGroups){
+    var tCount, hasStepIncrement, hasStepCount,
+        maxHeight = barGroups.maxHeight;
     axis = axis || {};
     hasStepIncrement = axis.step; // NOTE: This is FALSEY if axis.step equals 0, null or undefined
     hasStepCount = !SC.none(axis.steps);
 
     axis.coordScale = (end - start) / maxHeight;
     
-    
-    if(!hasStepIncrement && !hasStepCount){ // make and educated guess with 10 tick marks
-      tCount = maxHeight > 10 ? 10 : maxHeight;
-      axis.step = ~~(maxHeight/tCount);
+    if(!hasStepIncrement && !hasStepCount){ // use the auto scale steps
+      tCount = ~~((barGroups.maxHeight - barGroups.minHeight)/barGroups.step);
+      axis.step = barGroups.step;
     } else if(hasStepCount){ // use a total count of X
       tCount = axis.steps;
-      axis.step = ~~(maxHeight/tCount);
-      axis.step = axis.step || 1;
+      axis.step = ~~((barGroups.maxHeight - barGroups.minHeight)/tCount);
     } else { // Use step increments of X
-      tCount = axis.step ? ~~(maxHeight / axis.step) : maxHeight;
+      tCount = ~~((barGroups.maxHeight - barGroups.minHeight) / axis.step);
     }
     
     axis.space = (end - start)/tCount;
@@ -256,8 +277,9 @@ Sai.BarChartView = Sai.AxisChartView.extend({
   },
   
   _calculateBarGroups: function(d, isStacked){
-    var ret = {maxGroupNum: 0, maxHeight: 0}, mmax = Math.max,
-        tmpMax = 0, tmpLen = 0; 
+    var ret = {maxGroupNum: 0, maxHeight: 0, minHeight: 0, step: 0}, mmax = Math.max,
+        tmpMax = 0, tmpLen = 0, totalHeights = [],
+        outOf = this.get('dataAttrs').outOf, autoScale;
     d = d || [];
     if(isStacked){
       ret.maxGroupNum = 1;
@@ -266,11 +288,14 @@ Sai.BarChartView = Sai.AxisChartView.extend({
         d.forEach( function(data){
           tmpMax = 0;
           data.forEach( function(x){ tmpMax += x; });
-          ret.maxHeight = ret.maxHeight < tmpMax ? tmpMax : ret.maxHeight;
+          totalHeights.push(tmpMax);
         });
+        if (outOf) { totalHeights.push(0) }
+        autoScale = Sai.autoscale(totalHeights);
+        console.log("Stacked Autoscale", autoScale);
       }
       else {
-        ret.maxHeight = mmax.apply(0, d) || 0;
+        autoScale = Sai.autoscale(SC.clone(d).push(0));
       }
     }
     else {
@@ -279,15 +304,19 @@ Sai.BarChartView = Sai.AxisChartView.extend({
         d.forEach( function(data){
           tmpLen = data.length || 0;
           ret.maxGroupNum = ret.maxGroupNum < tmpLen ? tmpLen : ret.maxGroupNum;
-          tmpMax = mmax.apply(0, data);
-          ret.maxHeight = ret.maxHeight < tmpMax ? tmpMax : ret.maxHeight;
+          totalHeights.pushObjects(data);
         });
+        autoScale = Sai.autoscale(totalHeights);
       }
       else {
+        autoScale = Sai.autoscale(d);
         ret.maxGroupNum = d.length || 0;
-        ret.maxHeight = mmax.apply(0, d) || 0;
       }
     }
+
+    ret.maxHeight = autoScale.max;
+    ret.minHeight = autoScale.min;
+    ret.step      = autoScale.step;
 
     return ret;
   }
