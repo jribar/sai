@@ -29,7 +29,7 @@ Sai.PieChartView = Sai.CanvasView.extend(
   displayProperties: 'data dataAttrs grid yaxis xaxis'.w(),
 
   renderCanvas: function(canvas, firstTime) {
-    var d = this.get('data') || [],
+    var d = SC.copy(this.get('data')) || [],
         dAttrs = this.get('dataAttrs') || {},
         f = this.get('frame'),
         legend = this.get('legend'),
@@ -179,7 +179,7 @@ Sai.PieChartView = Sai.CanvasView.extend(
     var returnThisValue = function() {
       return this.value;
     };
-    
+
     if (len === 1) {
       var c = Sai.Circle.create({
         x: cx,
@@ -187,7 +187,7 @@ Sai.PieChartView = Sai.CanvasView.extend(
         radius: r,
         fill: atts.colors && atts.colors[0] || colors[0],
         stroke: atts.stroke || "#fff",
-        strokeWidth: Sai.validStrokeWidth(atts.strokeWidth, 0)
+        strokeWidth: atts.strokeWidth || 0
       }),
           i;
       c = canvas.element(c, "circle-0") ;
@@ -210,7 +210,7 @@ Sai.PieChartView = Sai.CanvasView.extend(
       }
 
       for (i = 0; i < len; i++) {
-        if (defcut && (values[i] * 360 / total <= 1.5)) {
+        /*if (defcut && (values[i] * 360 / total <= 1.5)) {
           cut = i;
           defcut = false;
         }
@@ -219,9 +219,9 @@ Sai.PieChartView = Sai.CanvasView.extend(
           values[cut].value += values[i];
           values[cut].others = true;
           others = values[cut].value;
-        }
+        }*/
       }
-      len = Math.min(cut + 1, values.length);
+      //len = Math.min(cut + 1, values.length);
       if (others) {
         values.splice(len);
         values[cut].others = true;
@@ -236,13 +236,26 @@ Sai.PieChartView = Sai.CanvasView.extend(
           var ipath = sector(cx, cy, 1, angle, angle - 360 * values[i] / total).join(",");
         }
         var path = sector(cx, cy, r, angle, angle -= 360 * values[i] / total);
-        var p = Sai.Path.create({
-          path: atts.init ? ipath : path,
-          fill: color(i),
-          stroke: atts.stroke || "#fff",
-          "stroke-width": (atts.strokewidth ? atts.strokewidth : 1),
-          "stroke-linejoin": "round"
-        });
+        var p;
+        if (values[i] == total ) {
+          var c = Sai.Circle.create({
+            x: cx,
+            y: cy,
+            radius: r,
+            fill: color(i),
+            stroke: atts.stroke || "#fff",
+            strokeWidth: atts.strokeWidth || 0
+          });
+          p = canvas.element(c, "circle-%@".fmt(i)) ;
+        } else {
+          p = Sai.Path.create({
+            path: atts.init ? ipath : path,
+            fill: color(i),
+            stroke: atts.stroke || "#fff",
+            "stroke-width": (atts.strokewidth ? atts.strokewidth : 1),
+            "stroke-linejoin": "round"
+          });
+        }
         p.value = values[i];
         p.middle = path.middle;
         p.mangle = mangle;
@@ -250,6 +263,15 @@ Sai.PieChartView = Sai.CanvasView.extend(
         sectors.push(p);
         series.push(p);
         if (atts.init) p.animate({path: path.join(",")}, (+atts.init - 1) || 1000, ">");
+      }
+    }
+
+    // Include Perecents or Values with Legend
+    for (i = 0; i < len; i++) {
+      if (legend.includePercents) {
+        legend.labels[i] = legend.labels[i] + ' (' + Math.round(values[i].value / total * 100) + '%)';
+      } else if (legend.includeValues) {
+        legend.labels[i] = legend.labels[i] + ' (' + values[i].value + ')';
       }
     }
 
