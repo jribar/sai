@@ -71,7 +71,7 @@ Sai.BarChartView = Sai.AxisChartView.extend({
         x -= ((gmn*bWidth) + ((gmn-1)*bSpacing))/2;
         series.forEach( function(bar, j){
           bHeight = yaxis.coordScale*(bar-yaxis.heightStart);
-          color = colorIsArray ? colors[j%clen] : colors ;
+          color = colorIsArray ? colors[(j-1)%clen] : colors ;
           y = yaxis.coordMin-bHeight;
           canvas.rectangle(~~x, ~~y, bWidth, ~~bHeight, 0, {stroke: color, fill: color}, 'bar-%@-%@'.fmt(i,j));
           x += bWidth+bSpacing;
